@@ -147,3 +147,11 @@ def test_incomplete_wikidata_batch_rejected():
     class FakeHTTP:
         def get(self,*args):return {'entities':{}}
     with pytest.raises(ValueError,match='Incomplete'):WikidataClient(FakeHTTP()).fetch(['Q1'])
+
+
+def test_batch_export_matches_individual_records(repo):
+    ids=['3','1','2','1']
+    result=repo.raw_laureates(ids)
+    assert result==[repo.raw_laureate(i) for i in ['1','2','3']]
+    assert repo.raw_laureates([])==[]
+    assert repo.raw_laureates(['missing'])==[]
