@@ -8,3 +8,6 @@ __pycache__/
 .streamlit/secrets.toml
 .env
 playwright-report/
+
+# Temporary Colab preview processes and logs
+.preview-runtime/
