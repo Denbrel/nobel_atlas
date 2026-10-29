@@ -1,2 +1,3 @@
-"""Nobel Atlas — domain, ingestion, storage and analysis."""
-__version__ = '2.0.0'
+"""Nobel Atlas — исследовательский проект Дениса Бреля."""
+
+__version__ = "2.2.0"
