@@ -86,6 +86,18 @@ class DatabaseRepository:
         with closing(self.connect()) as c:
             row = c.execute('SELECT raw_json FROM laureates WHERE id=?', (str(identifier),)).fetchone()
             return json.loads(row[0]) if row else None
+    def raw_laureates(self, identifiers):
+        """Batch export with one connection; don't open a database per person."""
+        ids = sorted(set(map(str, identifiers)))
+        result = []
+        with closing(self.connect()) as c:
+            # Keep below SQLite builds with the historical 999-parameter limit.
+            for start in range(0, len(ids), 500):
+                batch = ids[start:start + 500]
+                marks = ','.join('?' for _ in batch)
+                rows = c.execute(f'SELECT raw_json FROM laureates WHERE id IN ({marks}) ORDER BY id', batch)
+                result.extend(json.loads(row[0]) for row in rows)
+        return result
     def read_frames(self):
         import pandas as pd
         with closing(self.connect()) as c:

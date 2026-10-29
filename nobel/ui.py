@@ -127,10 +127,12 @@ def render_card(raw, all_credits, matching, affiliations, cache):
                     qid=value['id']; labels=cache.get(qid,{}).get('data',{}).get('labels',{})
                     values.append((labels.get('ru') or labels.get('en') or {}).get('value',qid))
             if values: st.write(f'**{label} · Wikidata:** '+', '.join(dict.fromkeys(values)))
-    with st.expander('Полная запись API, примечания и все языковые версии'):
-        st.json(raw,expanded=False)
-        st.download_button('Скачать запись JSON',json.dumps(raw,ensure_ascii=False,indent=2),
-            file_name=f'nobel_{raw["id"]}.json',mime='application/json')
-        if entity:
-            st.caption('Wikidata: исходные утверждения, квалификаторы времени и ссылки на источники')
-            st.json(entity,expanded=False)
+    raw_record_panel=st.expander('Полная запись API, примечания и все языковые версии', key='raw_record_panel', on_change='rerun')
+    if raw_record_panel.open:
+        with raw_record_panel:
+            st.json(raw,expanded=False)
+            st.download_button('Скачать запись JSON',json.dumps(raw,ensure_ascii=False,indent=2),
+                file_name=f'nobel_{raw["id"]}.json',mime='application/json')
+            if entity:
+                st.caption('Wikidata: исходные утверждения, квалификаторы времени и ссылки на источники')
+                st.json(entity,expanded=False)
