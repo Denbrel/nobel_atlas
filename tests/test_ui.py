@@ -118,3 +118,26 @@ def test_export_works_without_old_repository_method_and_invalidates_selection(
     assert at.session_state[
         "export_payload"
     ]  # Файл остаётся доступен после перерисовки.
+
+
+def test_map_views_are_independent_and_do_not_filter_laureates(monkeypatch):
+    """Охват меняет карту, а не выборку; обе карты сохраняют колесо масштабирования."""
+    at = start(monkeypatch)
+    initial_counts = [item.value for item in at.metric]
+    for view in ("Европа", "Глобус", "Мир"):
+        at.selectbox(key="map_projection").select(view).run()
+        assert not at.exception
+        assert [item.value for item in at.metric] == initial_counts
+    at.session_state["migration_panel"] = True
+    at.run()
+    at.selectbox(key="flow_view").select("Европа").run()
+    assert not at.exception
+    assert at.selectbox(key="map_projection").value == "Мир"
+    figures = [json.loads(item.proto.spec) for item in at.get("plotly_chart")]
+    maps = [figure for figure in figures if figure["layout"].get("geo")]
+    assert len(maps) == 2
+    assert maps[1]["layout"]["geo"]["center"] == {"lon": 15, "lat": 51}
+    assert all(figure["layout"]["height"] >= 640 for figure in maps)
+    for item in at.get("plotly_chart"):
+        if json.loads(item.proto.spec)["layout"].get("geo"):
+            assert json.loads(item.proto.config)["scrollZoom"] is True

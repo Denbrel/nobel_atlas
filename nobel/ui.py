@@ -10,7 +10,8 @@ from .analysis import description
 
 CSS = """<style>
 .stApp{background:#F8F9F5;color:#213E49}
-.block-container{padding-top:2rem;padding-bottom:2rem;max-width:1480px}
+/* Основная область использует всю доступную ширину рядом с боковыми фильтрами. */
+.block-container{padding-top:2rem;padding-bottom:2rem;max-width:none;padding-left:clamp(1rem,2vw,2rem);padding-right:clamp(1rem,2vw,2rem)}
 /* Скрываем служебную панель, сохраняя кнопку открытия боковых фильтров. */
 [data-testid="stToolbar"],[data-testid="stMainMenu"],.stAppDeployButton,[data-testid="stDecoration"]{display:none!important}
 [data-testid="stHeader"]{background:transparent;height:2rem}
@@ -38,7 +39,7 @@ h1,h2,h3{letter-spacing:-.025em;color:#213E49} h1{font-family:Georgia,serif;font
 .footer-links{display:flex;gap:20px;align-items:center;flex-wrap:wrap;font: .8rem Arial,sans-serif}
 .footer-links a,.footer-links button{color:#3B6F72;text-decoration:none}
 .footer-links button{background:none;border:0;padding:0;cursor:pointer;font:inherit}
-@media(max-width:700px){.block-container{padding-left:1rem;padding-right:1rem}.profile{padding:20px}.brand span{display:none}}
+@media(max-width:700px){.block-container{padding-left:1rem;padding-right:1rem}.profile{padding:20px}.brand span{display:block;margin:6px 0 0;line-height:1.4}}
 @media print{[data-testid="stSidebar"],[data-testid="stHeader"],.footer-links{display:none!important}.stApp,[data-testid="stMain"]{height:auto!important;overflow:visible!important}.block-container{padding:0!important}[data-testid="stPlotlyChart"]{break-inside:avoid}}
 </style>"""
 
@@ -90,7 +91,7 @@ def render_footer(meta):
         f"Официальные открытые данные · Nobel Prize API 2.1 · Снимок: {updated}<br>"
         f'{int(meta.get("laureate_count", 0)):,} лауреатов · {int(meta.get("award_count", 0)):,} награждений<br>'
         "Данные: Nobel Prize Outreach. Подложка: Natural Earth / Plotly. "
-        "Учебный проект не связан с Нобелевским фондом.</div>",
+        "Исследовательско-прикладной проект не связан с Нобелевским фондом.</div>",
         unsafe_allow_html=True,
     )
     # JavaScript целиком задан автором приложения: внешние строки сюда не вставляются.

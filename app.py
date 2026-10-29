@@ -16,12 +16,15 @@ from nobel.exports import read_laureates
 from nobel.models import full_date
 
 st.set_page_config(
-    page_title="Nobel Atlas · люди, открытия, места", page_icon="✦", layout="wide"
+    page_title="Nobel Atlas · база данных лауреатов Нобелевской премии",
+    page_icon="✦",
+    layout="wide",
 )
 st.markdown(CSS, unsafe_allow_html=True)
 DB = Path(os.getenv("NOBEL_DB", Path(__file__).with_name("nobel_database.sqlite")))
 
 
+# Декоратор кэширует чтение SQLite; при изменении файла stamp обновляет кэш.
 @st.cache_data(show_spinner=False)
 def load_data(path, stamp):
     """Прочитать снимок один раз; stamp сбрасывает кэш при замене SQLite."""
@@ -184,7 +187,7 @@ spec = FilterSpec(
 filtered = service.filter(spec)
 # Компактный заголовок оставляет карту на первом экране.
 st.markdown(
-    '<div class="brand">✦ Nobel Atlas <span>Люди · открытия · места</span></div>',
+    '<div class="brand">✦ Nobel Atlas <span>База данных лауреатов Нобелевской премии</span></div>',
     unsafe_allow_html=True,
 )
 if filtered.empty:
@@ -210,15 +213,18 @@ if main.open:
             key="map_mode",
         )
         projection_label = m2.selectbox(
-            "Проекция", ["Мир", "Глобус"], key="map_projection"
+            "Область карты", ["Мир", "Европа", "Глобус"], key="map_projection"
         )
-        projection = "natural earth" if projection_label == "Мир" else "orthographic"
+        projection = {
+            "Мир": "equirectangular", "Европа": "europe", "Глобус": "orthographic"
+        }[projection_label]
+        # Подсказки показывают сведения, а географические функции сохраняют
+        # отдельные таблицы мест и правила подсчёта AnalyticsService.
+        map_locations = service.locations(spec)
+        map_selected = charts.map_details(filtered, map_locations)
         dot_size = m3.slider("Размер точек", 4, 14, 7, key="map_size")
         if mode == "Работа / расположение":
-            map_af = service.locations(spec).merge(
-                filtered[["award_key", "name", "award_year", "category_label", "kind"]],
-                on="award_key",
-            )
+            map_af = map_locations.merge(map_selected, on="award_key")
             map_af = map_af.dropna(subset=["work_lat", "work_lon"])
             chart(charts.work_map(map_af, projection, dot_size), "map_work")
             st.caption(
@@ -230,7 +236,7 @@ if main.open:
                 )
         else:
             fig, n = charts.birth_map(
-                filtered,
+                map_selected,
                 "birth" if mode == "Рождение / основание" else "death",
                 projection,
                 dot_size,
@@ -348,10 +354,10 @@ if main.open:
                 st.caption(
                     "Одна связь на лауреата: последняя выбранная премия с двумя координатами и первая подходящая аффилиация в порядке API. Порядок не означает «основное место работы»."
                 )
-                routes = service.routes(filtered, spec, one_per_person=True)
-                unpaired = filtered[
-                    (filtered.kind == "organization")
-                    & ~filtered.laureate_id.isin(routes.laureate_id)
+                routes = service.routes(map_selected, spec, one_per_person=True)
+                unpaired = map_selected[
+                    (map_selected.kind == "organization")
+                    & ~map_selected.laureate_id.isin(routes.laureate_id)
                 ]
                 f1, f2, f3 = st.columns(3)
                 maximum = int(filtered.laureate_id.nunique())
@@ -379,10 +385,18 @@ if main.open:
                 focus_label = f3.selectbox(
                     "Выделить лауреата", list(choices), key="flow_focus"
                 )
+                # Собственный выбор охвата независим от верхней карты.
+                flow_view = st.selectbox(
+                    "Область карты связей", ["Мир", "Европа", "Глобус"], key="flow_view"
+                )
+                flow_projection = {
+                    "Мир": "equirectangular", "Европа": "europe", "Глобус": "orthographic"
+                }[flow_view]
                 fig, shown, total = charts.flow_map(
                     routes,
                     limit,
                     opacity,
+                    projection=flow_projection,
                     focus=choices[focus_label],
                     unpaired=unpaired,
                 )
@@ -614,7 +628,19 @@ if about.open:
     with about:
         st.subheader("О данных и исследовании")
         st.write(
-            "Nobel Atlas — учебный исследовательский проект Дениса Бреля. Он помогает изучать лауреатов, поколения и географию знаний на основе официального Nobel Prize API 2.1."
+            "Nobel Atlas — исследовательско-прикладной проект: полная база данных о лауреатах Нобелевской премии в пределах сведений, опубликованных официальным источником. Она объединяет людей, организации и историю награждений в одном пространстве для поиска, сравнения и анализа."
+        )
+        st.write(
+            "База включает все доступные записи лауреатов и премий: биографические даты, места рождения, основания и смерти, формулировки заслуг, категории, доли премий, суммы и аффилиации. Полнота загрузки означает сохранение всех записей и полей источника; она не означает, что у каждого лауреата известны все сведения."
+        )
+        st.write(
+            "Интерактивные карты и диаграммы помогают исследовать географию знаний, сравнивать поколения и дисциплины, находить центры научной деятельности и изучать связи между происхождением лауреатов и местами их работы. Фильтры и лаборатория позволяют сформировать собственный вопрос и выгрузить выбранные данные для дальнейшего анализа."
+        )
+        st.write(
+            "Проект полезен исследователям истории науки и культуры, аналитикам, журналистам и всем, кто хочет перейти от отдельных биографий к сравнению большого набора данных. Географические связи дают основу для гипотез, но сами по себе не доказывают причины научного успеха или маршруты миграции."
+        )
+        st.write(
+            "Автоматическое обновление по расписанию получает новые награждения и исправления ранее опубликованных сведений. Сайт использует последний успешно проверенный снимок базы; дата этого снимка указана внизу страницы. Повторная загрузка проверяет согласованность данных и не создаёт дубликаты."
         )
         st.caption(
             "Фильтры слева действуют и здесь. Показатели полноты относятся к текущей выборке; объём всего снимка указан отдельно."
@@ -671,7 +697,7 @@ if about.open:
             "У организаций используются место основания и расположение из записи о награждении. Если второго места нет, показан только контурный ромб основания. Города церемонии, современные штаб-квартиры и центры стран вместо неизвестных мест не подставляются."
         )
         st.write(
-            "Если в записи нет координат, они могут быть дополнены из другой записи Nobel при точном совпадении города и страны и единственной паре координат. Источник дополнения подписан при наведении и в выгрузке. Первичные записи API остаются неизменными."
+            "Если в записи нет координат, они могут быть дополнены из другой записи Nobel при точном совпадении города и страны и единственной паре координат. Источник дополнения указан в таблицах этого раздела и в выгрузке. Первичные записи API остаются неизменными."
         )
         organizations = filtered[filtered.kind == "organization"].drop_duplicates(
             "laureate_id"

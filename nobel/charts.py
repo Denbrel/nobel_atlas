@@ -1,6 +1,7 @@
 """Графики Plotly: единая палитра и явно определённые единицы подсчёта."""
 
 from html import escape
+from textwrap import wrap
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -30,13 +31,33 @@ def style(fig, height=340, geo=False):
     return fig
 
 
-def map_style(fig, projection="natural earth", height=450):
-    """Оформить географическую подложку и выбрать проекцию карты."""
+def map_style(fig, projection="equirectangular", height=640):
+    """Заполнить область графика картой, без сжатия под нижнюю легенду.
+
+    Плоская прямоугольная проекция лучше использует широкую область страницы.
+    Европа — начальный географический охват, а не фильтр данных. fitbounds=False
+    не даёт Plotly самопроизвольно менять охват при изменении набора точек.
+    """
     style(fig, height, geo=True)
-    # При смене фильтров сохраняем ручной масштаб; смена проекции сбрасывает его.
-    fig.update_layout(uirevision=f"map-{projection}")
+    europe = projection == "europe"
+    globe = projection == "orthographic"
+    fig.update_layout(
+        autosize=True,
+        width=None,
+        margin=dict(l=0, r=0, t=52, b=0),
+        legend=dict(orientation="h", x=0, y=1.02, yanchor="bottom"),
+        # Новый ключ сбрасывает старый масштаб маленькой карты после обновления.
+        uirevision=f"wide-map-v3-{projection}",
+    )
     fig.update_geos(
-        projection_type=projection,
+        domain=dict(x=[0, 1], y=[0, 1]),
+        fitbounds=False,
+        projection_type="equirectangular" if europe else projection,
+        projection_scale=1,
+        projection_rotation=dict(lon=15, lat=35) if globe else dict(lon=0, lat=0),
+        center=dict(lon=15, lat=51) if europe else dict(lon=0, lat=12.5),
+        lonaxis_range=[-30, 60] if europe else [-180, 180],
+        lataxis_range=[30, 72] if europe else [-60, 85],
         resolution=110,
         showframe=False,
         showcountries=True,
@@ -50,9 +71,110 @@ def map_style(fig, projection="natural earth", height=450):
         showocean=True,
         oceancolor="#F8FAF7",
         bgcolor="rgba(0,0,0,0)",
-        lataxis_range=[-60, 85],
     )
     return fig
+
+
+def _clean_label(value):
+    """Не выводить None/NaN вместо отсутствующих сведений; HTML экранируется позже."""
+    if value is None or pd.isna(value):
+        return ""
+    value = str(value).strip()
+    return "" if value in ("", "Не указано", "nan", "None") else value
+
+
+def _place_label(row, prefix):
+    """Собрать подпись места только из известных города и страны."""
+    return (
+        ", ".join(
+            value
+            for field in ("city", "country")
+            if (value := _clean_label(row.get(f"{prefix}_{field}")))
+        )
+        or "Не указано"
+    )
+
+
+def _event_date(value):
+    """Показать точную дату либо известную часть без фиктивных нулевых дней."""
+    value = _clean_label(value)
+    parts = value.split("-")
+    if len(parts) == 3:
+        if parts[1] == "00":
+            return parts[0] + " (год)"
+        if parts[2] == "00":
+            return "-".join(parts[:2]) + " (месяц)"
+    return value
+
+
+def map_details(selected, locations):
+    """Добавить места работы к подсказкам, не меняя фильтры и число награждений.
+
+    В подсказке перечисляются все известные места по выбранным премиям,
+    включая места без координат. На карте по-прежнему рисуются только точки
+    с координатами. У нескольких премий одного человека сведения объединяются.
+    """
+    result = selected.copy()
+    places = locations.merge(
+        selected[["award_key", "laureate_id", "award_year", "kind"]], on="award_key"
+    ).sort_values(["award_year", "ordinal"])
+    labels = {}
+    for _, row in places.iterrows():
+        place = _place_label(row, "work")
+        # Для организаций institution содержит техническую подпись источника.
+        # Она не является названием учреждения и не нужна в карточке.
+        institution = (
+            _clean_label(row.get("institution")) if row["kind"] == "person" else ""
+        )
+        value = " · ".join(
+            x for x in (place if place != "Не указано" else "", institution) if x
+        )
+        if value:
+            labels.setdefault(row["laureate_id"], []).append(
+                f'{value} ({int(row["award_year"])})'
+            )
+    result["map_work_places"] = result.laureate_id.map(
+        {key: "; ".join(dict.fromkeys(values)) for key, values in labels.items()}
+    ).fillna("Не указано")
+    return result
+
+
+def _hover_value(value):
+    """Перенести длинные подписи без потери текста; затем экранировать каждую строку."""
+    # Plotly не переносит длинный текст автоматически. Ограничение строки
+    # сохраняет читаемость карточки с несколькими местами работы.
+    return "<br>".join(escape(line) for line in wrap(value, width=56))
+
+
+def laureate_hover(row, distance=None):
+    """Общая карточка всех карт: три жизненных места без технических источников.
+
+    Экранирование выполняется перед вставкой текста в HTML-подсказку, поэтому
+    имена, города и учреждения из внешних данных не могут добавить разметку.
+    """
+    organization = row.get("kind") == "organization"
+    origin = _place_label(row, "origin")
+    birth_date = _event_date(row.get("founded_date" if organization else "birth_date"))
+    if birth_date:
+        origin = f"{birth_date} · {origin}"
+    work = _clean_label(row.get("map_work_places")) or _place_label(row, "work")
+    death = "Неприменимо к организации" if organization else _place_label(row, "death")
+    if not organization and (death_date := _event_date(row.get("death_date"))):
+        death = f"{death_date} · {death}"
+    category = _clean_label(row.get("categories")) or _clean_label(
+        row.get("category_label")
+    )
+    years = _clean_label(row.get("years")) or _clean_label(row.get("award_year"))
+    lines = [
+        f'<b>{_hover_value(_clean_label(row.get("name")))}</b>',
+        _hover_value(" · ".join(x for x in (category, years) if x)),
+        f'<b>{"Основание" if organization else "Рождение"}:</b><br>{_hover_value(origin)}',
+        f'<b>Работа / расположение:</b><br>{_hover_value(work)}',
+        f'<b>Место смерти:</b><br>{_hover_value(death)}',
+    ]
+    if distance is not None:
+        lines.append(f"Между точками: {distance:,.0f} км")
+    return "<br>".join(lines)
 
 
 def origin_points(df):
@@ -73,20 +195,14 @@ def origin_points(df):
     return base
 
 
-def birth_map(df, mode="birth", projection="natural earth", size=7):
+def birth_map(df, mode="birth", projection="equirectangular", size=7):
     """Карта происхождения (рождение/основание) или смерти с единой палитрой категорий."""
     base = origin_points(df)
     prefix = "origin" if mode == "birth" else "death"
     base = base.dropna(subset=[prefix + "_lat", prefix + "_lon"])
     fig = go.Figure()
     for category, group in base.groupby("category_label", sort=True):
-        hover = []
-        for _, row in group.iterrows():
-            kind = row["origin_kind"] if mode == "birth" else "Место смерти"
-            source = row.get(prefix + "_coord_source", "Nobel API") or "Nobel API"
-            hover.append(
-                f'<b>{escape(row["name"])}</b><br>{kind}: {escape(row[prefix+"_city"])}, {escape(row[prefix+"_country"])}<br>{escape(row["categories"])} · {row["years"]}<br>Координаты: {escape(source)}'
-            )
+        hover = [laureate_hover(row) for _, row in group.iterrows()]
         fig.add_trace(
             go.Scattergeo(
                 lat=group[prefix + "_lat"],
@@ -111,7 +227,7 @@ def birth_map(df, mode="birth", projection="natural earth", size=7):
     return map_style(fig, projection), len(base)
 
 
-def work_map(routes, projection="natural earth", size=7):
+def work_map(routes, projection="equirectangular", size=7):
     """Звёзды обозначают аффилиацию людей или расположение организаций из API."""
     fig = go.Figure()
     for category, group in routes.groupby("category_label", sort=True):
@@ -126,10 +242,7 @@ def work_map(routes, projection="natural earth", size=7):
                     color=COLORS.get(category, GOLD),
                     opacity=0.8,
                 ),
-                text=[
-                    f'<b>{escape(r["name"])}</b><br>{escape(r["destination_kind"])}: {escape(r["work_city"])}<br>{escape(r["institution"])} · {int(r["award_year"])}<br>Координаты: {escape(r["work_coord_source"] or "Nobel API")}'
-                    for _, r in group.iterrows()
-                ],
+                text=[laureate_hover(row) for _, row in group.iterrows()],
                 hovertemplate="%{text}<extra></extra>",
                 name=category,
                 legendgroup=category,
@@ -341,7 +454,7 @@ def flow_map(
     routes,
     limit=60,
     opacity=0.24,
-    projection="natural earth",
+    projection="equirectangular",
     focus=None,
     unpaired=None,
 ):
@@ -380,8 +493,8 @@ def flow_map(
     )
     for category, group in shown.groupby("category_label", sort=True):
         hover = [
-            f'<b>{escape(r["name"])}</b><br>{escape(r["origin_kind"])}: {escape(r["origin_city"])} → {escape(r["destination_kind"])}: {escape(r["work_city"])}<br>{int(r["award_year"])} · {r["distance_km"]:,.0f} км<br>Начало: {escape(r["origin_coord_source"] or "Nobel API")}<br>Назначение: {escape(r["work_coord_source"] or "Nobel API")}'
-            for _, r in group.iterrows()
+            laureate_hover(row, distance=row["distance_km"])
+            for _, row in group.iterrows()
         ]
         for prefix, size in [("origin", 7), ("work", 10)]:
             symbols = (
@@ -421,17 +534,14 @@ def flow_map(
                     marker=dict(
                         symbol="diamond-open", size=9, color=COLORS.get(category, TEAL)
                     ),
-                    text=[
-                        f'<b>{escape(r["name"])}</b><br>Основание: {escape(r["origin_city"])}<br>Второе место с координатами не указано<br>{escape(r["origin_coord_source"])}'
-                        for _, r in group.iterrows()
-                    ],
+                    text=[laureate_hover(row) for _, row in group.iterrows()],
                     hovertemplate="%{text}<extra></extra>",
                     name=category,
                     legendgroup=category,
                     showlegend=category not in set(shown.category_label),
                 )
             )
-    return map_style(fig, projection, 510), shown, len(eligible)
+    return map_style(fig, projection, 680), shown, len(eligible)
 
 
 def sankey(routes, top=18):
