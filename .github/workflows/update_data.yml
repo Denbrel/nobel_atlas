@@ -1,0 +1,56 @@
+name: Update Nobel data
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      wikidata:
+        description: 'Also refresh optional Wikidata enrichment (90-day cache)'
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: nobel-data-update
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NOBEL_USER_AGENT: NobelAtlas/2.0 (https://github.com/${{ github.repository }})
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download, validate and atomically update database
+        env:
+          ENRICH: ${{ inputs.wikidata }}
+        run: |
+          if [ "$ENRICH" = "true" ]; then
+            python updater.py --wikidata
+          else
+            python updater.py
+          fi
+      - name: Validate relational integrity
+        run: |
+          python - <<'PY'
+          import sqlite3
+          with sqlite3.connect('nobel_database.sqlite') as db:
+              assert db.execute('pragma integrity_check').fetchone()[0] == 'ok'
+              assert not db.execute('pragma foreign_key_check').fetchall()
+          PY
+      - name: Commit only actual changes
+        run: |
+          if git diff --quiet -- nobel_database.sqlite; then
+            echo 'No changes in source data.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add nobel_database.sqlite
+          git commit -m 'data: refresh verified Nobel snapshot'
+          git push origin HEAD:${{ github.event.repository.default_branch }}
